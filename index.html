@@ -280,20 +280,80 @@ function initFirebase(){
     }
     db=firebase.firestore();
     fbReady=true;
-    console.log('✅ Firestore ready');
+    console.log('✅ Firestore ready, fbReady=true');
     updateFbBanner(null);
-    // Start real-time listeners immediately
     setupListeners();
     if(cu){ loadFromFirebase(); }
   }catch(e){
-    console.error('Firebase init error:',e);
+    console.error('❌ Firebase init FAILED:',e.code, e.message);
     updateFbBanner('⚠️ Erro Firebase: '+e.message, false);
+    fbReady=false;
   }
 }
 
+// ── FIREBASE DB HELPERS ──
+async function dbGet(col){
+  if(!fbReady)return[];
+  try{
+    const s=await db.collection(col).get();
+    return s.docs.map(function(d){var o=d.data();o.id=d.id;return o;});
+  }catch(e){console.error('dbGet error:',col,e.message);return[];}
+}
+async function dbSet(col,id,data){
+  if(!fbReady){console.warn('dbSet skipped fbReady=false');return;}
+  try{
+    await db.collection(col).doc(id).set(data,{merge:true});
+    console.log('Saved:',col+'/'+id);
+  }catch(e){
+    console.error('dbSet FAILED:',col,id,e.message);
+    updateFbBanner('Erro ao guardar: '+e.message,false);
+  }
+}
+async function dbDel(col,id){
+  if(!fbReady)return;
+  try{await db.collection(col).doc(id).delete();}
+  catch(e){console.error('dbDel error:',e.message);}
+}
+async function loadFromFirebase(){
+  console.log('loadFromFirebase fbReady='+fbReady);
+  if(!fbReady)return;
+  try{
+    const snap_s=await db.collection('shopping').get();
+    const shop=snap_s.docs.map(function(d){var o=d.data();o.id=d.id;return o;});
+    const snap_t=await db.collection('tasks').get();
+    const tasks=snap_t.docs.map(function(d){var o=d.data();o.id=d.id;return o;});
+    const snap_o=await db.collection('orders').get();
+    const orders=snap_o.docs.map(function(d){var o=d.data();o.id=d.id;return o;});
+    const snap_u=await db.collection('users').get();
+    const users=snap_u.docs.map(function(d){var o=d.data();o.id=d.id;return o;});
+    const snap_p=await db.collection('products').get();
+    const prods=snap_p.docs.map(function(d){var o=d.data();o.id=d.id;return o;});
+    const snap_per=await db.collection('personal').get();
+    const personalDocs=snap_per.docs.map(function(d){var o=d.data();o.id=d.id;return o;});
+    if(shop.length)S.shopping=shop;
+    if(tasks.length)S.tasks=tasks;
+    if(orders.length)S.orders=orders;
+    if(users.length){S.users=users;}
+    else{S.users.forEach(function(u){dbSet('users',u.id,u);});}
+    if(prods.length)S.products=prods;
+    personalDocs.forEach(function(d){
+      if(d.type==='invoice')S.personal.invoices.push(d);
+      if(d.type==='shift'){if(!S.personal.shifts)S.personal.shifts=[];S.personal.shifts.push(d);}
+    });
+    const appDoc=await db.collection('settings').doc('app').get();
+    if(appDoc.exists)Object.assign(S.settings,appDoc.data());
+    const calDoc=await db.collection('settings').doc('calendar').get();
+    if(calDoc.exists){S.cal.reqs=calDoc.data().reqs||[];S.cal.appr=calDoc.data().appr||[];}
+    setupListeners();
+    console.log('Data loaded OK');
+  }catch(e){console.error('loadFromFirebase error:',e.message);}
+}
+
 function setupListeners(){
+  console.log('setupListeners called, fbReady='+fbReady+', active='+listenersActive);
   if(listenersActive||!fbReady)return;
   listenersActive=true;
+  console.log('✅ Setting up Firestore listeners');
   // Live shopping list
   db.collection('shopping').onSnapshot(function(snap){
     S.shopping=snap.docs.map(function(d){return{id:d.id,...d.data()};});
