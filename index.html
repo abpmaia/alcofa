@@ -266,9 +266,11 @@ function initFirebase() {
   try {
     if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
     db = firebase.firestore();
+    // Force long polling to avoid WebSocket issues on GitHub Pages
+    db.settings({ experimentalForceLongPolling: true, merge: true });
     FB = true;
     fbStatus(null);
-    console.log('Firebase OK');
+    console.log('Firebase OK - project:', FIREBASE_CONFIG.projectId);
   } catch(e) {
     console.error('Firebase failed:', e.message);
     fbStatus('Firebase erro: ' + e.message, false);
