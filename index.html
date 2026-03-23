@@ -345,37 +345,73 @@ async function loadFromFirebase(){
     const calDoc=await db.collection('settings').doc('calendar').get();
     if(calDoc.exists){S.cal.reqs=calDoc.data().reqs||[];S.cal.appr=calDoc.data().appr||[];}
     setupListeners();
-    console.log('Data loaded OK');
+    console.log('Data loaded OK - shopping:'+S.shopping.length+' tasks:'+S.tasks.length);
+    // Re-render whatever tab is currently active
+    var activeTab=document.querySelector('.ntab.on');
+    if(activeTab){
+      var tabId=activeTab.id.replace('nt-','');
+      showTab(tabId);
+    }
   }catch(e){console.error('loadFromFirebase error:',e.message);}
 }
 
 function setupListeners(){
-  console.log('setupListeners called, fbReady='+fbReady+', active='+listenersActive);
+  console.log('setupListeners fbReady='+fbReady+' active='+listenersActive);
   if(listenersActive||!fbReady)return;
   listenersActive=true;
-  console.log('✅ Setting up Firestore listeners');
-  // Live shopping list
+
   db.collection('shopping').onSnapshot(function(snap){
-    S.shopping=snap.docs.map(function(d){return{id:d.id,...d.data()};});
-    var el=document.getElementById('sl');if(el)el.innerHTML=shopHTML();
-    var dash=document.getElementById('dreqs');if(document.getElementById('nt-dash')&&document.getElementById('nt-dash').classList.contains('on'))renderDash(document.getElementById('cnt'));
-  });
-  // Live tasks
+    S.shopping=snap.docs.map(function(d){var o=d.data();o.id=d.id;return o;});
+    console.log('shopping:',S.shopping.length);
+    refreshUI('shop','sl',shopHTML);
+    refreshDashIfActive();
+  },function(e){console.error('shopping snap err:',e.message);});
+
   db.collection('tasks').onSnapshot(function(snap){
-    S.tasks=snap.docs.map(function(d){return{id:d.id,...d.data()};});
-    var el=document.getElementById('tl');if(el)el.innerHTML=taskHTML();
+    S.tasks=snap.docs.map(function(d){var o=d.data();o.id=d.id;return o;});
+    console.log('tasks:',S.tasks.length);
+    refreshUI('tasks','tl',taskHTML);
     refreshDashIfActive();
-  });
-  // Live orders
+  },function(e){console.error('tasks snap err:',e.message);});
+
   db.collection('orders').onSnapshot(function(snap){
-    S.orders=snap.docs.map(function(d){return{id:d.id,...d.data()};});
+    S.orders=snap.docs.map(function(d){var o=d.data();o.id=d.id;return o;});
     refreshDashIfActive();
-  });
-  // Live calendar requests
+  },function(e){console.error('orders snap err:',e.message);});
+
   db.collection('settings').doc('calendar').onSnapshot(function(snap){
     if(snap.exists){S.cal.reqs=snap.data().reqs||[];S.cal.appr=snap.data().appr||[];}
     var cel=document.getElementById('creqs');if(cel)cel.innerHTML=reqsHTML();
-  });
+  },function(e){console.error('calendar snap err:',e.message);});
+
+  db.collection('settings').doc('app').onSnapshot(function(snap){
+    if(snap.exists)Object.assign(S.settings,snap.data());
+    refreshDashIfActive();
+  },function(e){console.error('settings snap err:',e.message);});
+
+  db.collection('users').onSnapshot(function(snap){
+    if(snap.docs.length)S.users=snap.docs.map(function(d){var o=d.data();o.id=d.id;return o;});
+  },function(e){console.error('users snap err:',e.message);});
+
+  db.collection('products').onSnapshot(function(snap){
+    if(snap.docs.length)S.products=snap.docs.map(function(d){var o=d.data();o.id=d.id;return o;});
+  },function(e){console.error('products snap err:',e.message);});
+
+  db.collection('personal').onSnapshot(function(snap){
+    S.personal.invoices=[];S.personal.shifts=[];
+    snap.docs.forEach(function(d){
+      var o=d.data();o.id=d.id;
+      if(o.type==='invoice')S.personal.invoices.push(o);
+      if(o.type==='shift')S.personal.shifts.push(o);
+    });
+    var il=document.getElementById('inv-list');if(il)il.innerHTML=invoiceHTML();
+    var sl2=document.getElementById('shift-list');if(sl2)sl2.innerHTML=shiftHTML();
+  },function(e){console.error('personal snap err:',e.message);});
+
+  db.collection('settings').doc('personal_notes').onSnapshot(function(snap){
+    if(snap.exists)S.personal.notes=snap.data().notes||'';
+    var el=document.getElementById('personal-notes');if(el)el.value=S.personal.notes;
+  },function(e){console.error('notes snap err:',e.message);});
 }
 
 function refreshDashIfActive(){
@@ -911,7 +947,9 @@ function delShift(id){
   document.getElementById('shift-list').innerHTML=shiftHTML();
 }
 function saveNotes(){
-  S.personal.notes=document.getElementById('personal-notes').value;
+  var el=document.getElementById('personal-notes');
+  if(!el)return;
+  S.personal.notes=el.value;
   if(fbReady)dbSet('settings','personal_notes',{notes:S.personal.notes});
   alert('✅ Notas guardadas!');
 }
@@ -953,9 +991,23 @@ function prodAdminHTML(filter){
   return prods.map(p=>`<div class="prod-admin-row"><div class="pn">${p.name}</div><div class="pc">€${p.cost.toFixed(2)}${p.pvp?' / €'+p.pvp.toFixed(2):''}</div>
   <button class="bic" onclick="openEditProd('${p.id}')">✏️</button><button class="bic" onclick="delProd('${p.id}')">🗑</button></div>`).join('');
 }
-function saveNotice(){S.settings.notice=document.getElementById('notice-txt').value.trim();if(fbReady)dbSet('settings','app',S.settings);alert('✅ Aviso guardado!');showTab('admin');}
+function saveNotice(){
+  var el=document.getElementById('notice-txt');
+  if(!el)return;
+  S.settings.notice=el.value.trim();
+  if(fbReady)dbSet('settings','app',S.settings);
+  alert('✅ Aviso guardado!');
+  showTab('admin');
+}
 function clearNotice(){S.settings.notice='';if(fbReady)dbSet('settings','app',S.settings);showTab('admin');}
-function saveSettings(){S.settings.shopName=document.getElementById('set-name').value;S.settings.ownerEmail=document.getElementById('set-email').value;if(fbReady)dbSet('settings','app',S.settings);alert('✅ Definições guardadas!');}
+function saveSettings(){
+  var n=document.getElementById('set-name');
+  var e=document.getElementById('set-email');
+  if(n) S.settings.shopName=n.value;
+  if(e) S.settings.ownerEmail=e.value;
+  if(fbReady)dbSet('settings','app',S.settings);
+  alert('✅ Definições guardadas!');
+}
 
 const AZ_CATS=['Bacalhau','Pratos Prontos','Risotos & Lasanhas','Entradas (Pack)','Empadas','Caixa (Avulso)'];
 function openAddUser(){openModal(`<h3>Novo utilizador</h3>
